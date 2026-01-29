@@ -644,7 +644,7 @@ def show():
                         nomor_ref_col = None
                         for col in df_merged.columns:
                             col_lower = col.lower()
-                            if any(keyword in col_lower for keyword in ['nomor', 'no_', 'no.', 'sp2d', 'dokumen', 'referensi']):
+                            if any(keyword in col_lower for keyword in ['Nomor Dok. Referensi']):
                                 nomor_ref_col = col
                                 break
                         
@@ -659,7 +659,7 @@ def show():
                         tanggal_ref_col = None
                         for col in df_merged.columns:
                             col_lower = col.lower()
-                            if any(keyword in col_lower for keyword in ['tanggal', 'tgl', 'date', 'dokumen', 'referensi', 'sp2d']):
+                            if any(keyword in col_lower for keyword in ['Tanggal Dok. Referensi']):
                                 tanggal_ref_col = col
                                 break
                         
@@ -689,7 +689,7 @@ def show():
                         tanggal_pemotongan_col = None
                         for col in df_merged.columns:
                             col_lower = col.lower()
-                            if any(keyword in col_lower for keyword in ['tanggal', 'tgl', 'date', 'pemotongan', 'potong', 'invoice', 'inv']):
+                            if any(keyword in col_lower for keyword in ['Tanggal Pemotongan']):
                                 tanggal_pemotongan_col = col
                                 break
                         
