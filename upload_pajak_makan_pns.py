@@ -7,6 +7,15 @@ from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font
 from openpyxl.utils import get_column_letter
 
+def find_column_by_keywords(df, keywords_list):
+    """Mencari kolom berdasarkan daftar kata kunci (case insensitive)"""
+    for col in df.columns:
+        col_lower = str(col).lower()
+        for keyword in keywords_list:
+            if keyword in col_lower:
+                return col
+    return None
+
 def check_duplicate_nips(df_mentah):
     """Cek NIP duplikat di data mentah dan return baris yang duplikat"""
     df_mentah['nip_clean'] = df_mentah['nip'].astype(str).str.strip()
@@ -399,11 +408,8 @@ def show():
                 st.stop()
             
             # Cari kolom KODE OBJEK PAJAK di Data Master
-            kode_pajak_col = None
-            for col in df_master.columns:
-                if 'KODE OBJEK PAJAK' in col.upper() or 'KODE_OBJEK_PAJAK' in col.upper():
-                    kode_pajak_col = col
-                    break
+            kode_pajak_keywords = ['kode objek pajak', 'kode_objek_pajak', 'objek pajak']
+            kode_pajak_col = find_column_by_keywords(df_master, kode_pajak_keywords)
             
             if not kode_pajak_col:
                 st.error("❌ **ERROR**: Kolom 'KODE OBJEK PAJAK' tidak ditemukan di Data Master")
@@ -574,11 +580,8 @@ def show():
                         df_result['NPWP'] = df_merged['NIK'].apply(lambda x: str(x).replace('.0', '') if pd.notna(x) else '')
                         
                         # 4. ID TKU Penerima Penghasilan: cari kolom yang cocok
-                        id_tku_col = None
-                        for col in df_merged.columns:
-                            if 'ID PENERIMA TKU' in col.upper() or 'ID_PENERIMA_TKU' in col.upper():
-                                id_tku_col = col
-                                break
+                        id_tku_keywords = ['id penerima tku', 'id_penerima_tku', 'id tku', 'id penerima', 'tku']
+                        id_tku_col = find_column_by_keywords(df_merged, id_tku_keywords)
                         
                         if id_tku_col:
                             df_result['ID TKU Penerima Penghasilan'] = df_merged[id_tku_col].astype(str)
@@ -639,31 +642,51 @@ def show():
                         # 11. Jenis Dok. Referensi: default "CommercialInvoice"
                         df_result['Jenis Dok. Referensi'] = 'CommercialInvoice'
                         
-                        # 12. Nomor Dok. Referensi: Cek apakah ada kolom nomor referensi di data mentah
-                        # Cari kolom yang mungkin berisi nomor referensi/SP2D
-                        nomor_ref_col = None
-                        for col in df_merged.columns:
-                            col_lower = col.lower()
-                            if any(keyword in col_lower for keyword in ['Nomor Dok. Referensi']):
-                                nomor_ref_col = col
-                                break
+                        # 12. Nomor Dok. Referensi: Cari kolom dengan berbagai variasi nama
+                        nomor_ref_keywords = [
+                            'nomor dok. referensi', 
+                            'nomor dok referensi',
+                            'nomor referensi',
+                            'nomor dokumen',
+                            'no dok referensi',
+                            'nomor sp2d',
+                            'no sp2d',
+                            'sp2d',
+                            'nomor dok',
+                            'referensi'
+                        ]
+                        nomor_ref_col = find_column_by_keywords(df_merged, nomor_ref_keywords)
                         
                         if nomor_ref_col and not df_merged[nomor_ref_col].isna().all():
+                            # Debug info
+                            st.info(f"🔍 Ditemukan kolom '{nomor_ref_col}' untuk Nomor Dok. Referensi")
+                            st.info(f"📋 Sample data dari kolom ini: {df_merged[nomor_ref_col].head(3).tolist()}")
+                            
                             df_result['Nomor Dok. Referensi'] = df_merged[nomor_ref_col].astype(str)
                             st.success(f"✅ Kolom Nomor Dok. Referensi ditemukan: {nomor_ref_col}")
                         else:
                             df_result['Nomor Dok. Referensi'] = ''
                             st.warning("⚠️ Kolom Nomor Dok. Referensi tidak ditemukan atau kosong, diisi dengan nilai kosong (warna oranye)")
                         
-                        # 13. Tanggal Dok. Referensi: Cek apakah ada kolom tanggal referensi di data mentah
-                        tanggal_ref_col = None
-                        for col in df_merged.columns:
-                            col_lower = col.lower()
-                            if any(keyword in col_lower for keyword in ['Tanggal Dok. Referensi']):
-                                tanggal_ref_col = col
-                                break
+                        # 13. Tanggal Dok. Referensi: Cari kolom dengan berbagai variasi nama
+                        tanggal_ref_keywords = [
+                            'tanggal dok. referensi',
+                            'tanggal dok referensi',
+                            'tanggal referensi',
+                            'tanggal dokumen',
+                            'tgl dok referensi',
+                            'tanggal sp2d',
+                            'tgl sp2d',
+                            'tanggal dok',
+                            'tgl referensi'
+                        ]
+                        tanggal_ref_col = find_column_by_keywords(df_merged, tanggal_ref_keywords)
                         
                         if tanggal_ref_col and not df_merged[tanggal_ref_col].isna().all():
+                            # Debug info
+                            st.info(f"🔍 Ditemukan kolom '{tanggal_ref_col}' untuk Tanggal Dok. Referensi")
+                            st.info(f"📋 Sample data dari kolom ini: {df_merged[tanggal_ref_col].head(3).tolist()}")
+                            
                             # Konversi ke format bulan/tanggal/tahun (8/4/2025)
                             try:
                                 # Coba parse tanggal dengan berbagai format
@@ -675,7 +698,7 @@ def show():
                                 st.success(f"✅ Kolom Tanggal Dok. Referensi ditemukan: {tanggal_ref_col}")
                                 st.info(f"📅 Format tanggal: bulan/tanggal/tahun (contoh: 8/4/2025)")
                             except Exception as e:
-                                st.warning(f"⚠️ Gagal mengonversi format tanggal di kolom {tanggal_ref_col}. Menggunakan format asli")
+                                st.warning(f"⚠️ Gagal mengonversi format tanggal di kolom {tanggal_ref_col}. Menggunakan format asli: {str(e)}")
                                 df_result['Tanggal Dok. Referensi'] = df_merged[tanggal_ref_col].astype(str)
                         else:
                             df_result['Tanggal Dok. Referensi'] = ''
@@ -685,15 +708,25 @@ def show():
                         df_result['ID TKU Pemotong'] = '0001658723701000000000'
                         st.success("✅ ID TKU Pemotong diatur default: 0001658723701000000000")
                         
-                        # 15. Tanggal Pemotongan: Cek apakah ada kolom tanggal pemotongan di data mentah
-                        tanggal_pemotongan_col = None
-                        for col in df_merged.columns:
-                            col_lower = col.lower()
-                            if any(keyword in col_lower for keyword in ['Tanggal Pemotongan']):
-                                tanggal_pemotongan_col = col
-                                break
+                        # 15. Tanggal Pemotongan: Cari kolom dengan berbagai variasi nama
+                        tanggal_potong_keywords = [
+                            'tanggal pemotongan',
+                            'tgl pemotongan',
+                            'tanggal potong',
+                            'tgl potong',
+                            'tanggal invoice',
+                            'tgl invoice',
+                            'invoice date',
+                            'tanggal transaksi',
+                            'tgl transaksi'
+                        ]
+                        tanggal_pemotongan_col = find_column_by_keywords(df_merged, tanggal_potong_keywords)
                         
                         if tanggal_pemotongan_col and not df_merged[tanggal_pemotongan_col].isna().all():
+                            # Debug info
+                            st.info(f"🔍 Ditemukan kolom '{tanggal_pemotongan_col}' untuk Tanggal Pemotongan")
+                            st.info(f"📋 Sample data dari kolom ini: {df_merged[tanggal_pemotongan_col].head(3).tolist()}")
+                            
                             # Konversi ke format bulan/tanggal/tahun (8/4/2025)
                             try:
                                 # Coba parse tanggal dengan berbagai format
@@ -705,11 +738,17 @@ def show():
                                 st.success(f"✅ Kolom Tanggal Pemotongan ditemukan: {tanggal_pemotongan_col}")
                                 st.info(f"📅 Format tanggal: bulan/tanggal/tahun (contoh: 8/4/2025)")
                             except Exception as e:
-                                st.warning(f"⚠️ Gagal mengonversi format tanggal di kolom {tanggal_pemotongan_col}. Menggunakan format asli")
+                                st.warning(f"⚠️ Gagal mengonversi format tanggal di kolom {tanggal_pemotongan_col}. Menggunakan format asli: {str(e)}")
                                 df_result['Tanggal Pemotongan'] = df_merged[tanggal_pemotongan_col].astype(str)
                         else:
                             df_result['Tanggal Pemotongan'] = ''
                             st.warning("⚠️ Kolom Tanggal Pemotongan tidak ditemukan atau kosong, diisi dengan nilai kosong (warna oranye)")
+                        
+                        # Tampilkan informasi kolom yang ditemukan
+                        st.info("📊 **Deteksi Kolom Otomatis:**")
+                        st.info(f"  • Nomor Dok. Referensi: {nomor_ref_col if nomor_ref_col else 'Tidak ditemukan'}")
+                        st.info(f"  • Tanggal Dok. Referensi: {tanggal_ref_col if tanggal_ref_col else 'Tidak ditemukan'}")
+                        st.info(f"  • Tanggal Pemotongan: {tanggal_pemotongan_col if tanggal_pemotongan_col else 'Tidak ditemukan'}")
                         
                         # Hitung statistik
                         processed_count = len(df_result)
