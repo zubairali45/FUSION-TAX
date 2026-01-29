@@ -52,14 +52,75 @@ def show():
         "1101": "K/1", "1102": "K/2"
     }
     
+    # ===== PERUBAHAN PENTING: FUNGSI UNTUK MEMPERTAHANKAN FORMAT ANGKA ASLI =====
+    def format_nilai_asli(nilai):
+        """Mempertahankan format nilai asli tanpa .00 atau notasi ilmiah"""
+        if pd.isna(nilai):
+            return ''
+        
+        # Jika nilai sudah string, kembalikan langsung
+        if isinstance(nilai, str):
+            return nilai.strip()
+        
+        # Jika nilai float atau integer
+        if isinstance(nilai, (int, float)):
+            # Cek apakah nilai integer sebenarnya (tanpa desimal)
+            if isinstance(nilai, float) and nilai.is_integer():
+                return str(int(nilai))
+            else:
+                # Untuk float dengan desimal, tampilkan tanpa trailing zeros
+                nilai_str = str(nilai)
+                if '.' in nilai_str:
+                    # Hapus trailing zeros setelah titik desimal
+                    nilai_str = nilai_str.rstrip('0').rstrip('.')
+                return nilai_str
+        
+        # Untuk tipe data lainnya
+        return str(nilai)
+    
+    def clean_numeric_series(series):
+        """Membersihkan series numerik agar tidak ada .00 yang tidak perlu"""
+        return series.apply(format_nilai_asli)
+    
+    def format_angka_panjang(nilai):
+        """Format khusus untuk angka panjang seperti NIP, rekening, dll."""
+        if pd.isna(nilai):
+            return ''
+        
+        nilai_str = str(nilai)
+        
+        # Hapus notasi ilmiah (e+)
+        if 'e+' in nilai_str.lower():
+            try:
+                # Coba konversi ke integer tanpa notasi ilmiah
+                nilai_float = float(nilai_str)
+                # Format tanpa notasi ilmiah dan tanpa desimal jika integer
+                if nilai_float.is_integer():
+                    return str(int(nilai_float))
+                else:
+                    # Format dengan semua digit
+                    return format(nilai_float, 'f').rstrip('0').rstrip('.')
+            except:
+                return nilai_str
+        
+        # Hapus .0, .00, .000, dll
+        if '.' in nilai_str:
+            parts = nilai_str.split('.')
+            # Jika bagian desimal hanya berisi 0, hapus bagian desimal
+            if len(parts) == 2 and all(c == '0' for c in parts[1]):
+                return parts[0]
+        
+        return nilai_str
+    # ===== END PERUBAHAN =====
+    
     # ===== FUNGSI VALIDASI DUPLIKASI =====
     def check_duplicates(df, column_name, file_name):
         """Cek duplikasi di kolom tertentu dan return dataframe duplikat"""
         if df is None or column_name not in df.columns:
             return None, []
         
-        # Ambil series dan bersihkan
-        series = df[column_name].astype(str).str.strip()
+        # Ambil series dan bersihkan - gunakan format asli
+        series = df[column_name].apply(format_nilai_asli)
         
         # Identifikasi duplikat (abaikan nilai kosong atau 'nan')
         mask = (series != 'nan') & (series != '') & (series.notna())
@@ -88,7 +149,7 @@ def show():
         if df is None or column_name not in df.columns:
             return df
         
-        series = df[column_name].astype(str).str.strip()
+        series = df[column_name].apply(format_nilai_asli)
         mask = (series != 'nan') & (series != '') & (series.notna())
         duplicates_mask = series[mask].duplicated(keep=False)
         
@@ -105,7 +166,7 @@ def show():
         """Konversi kdgol ke kode objek pajak"""
         if pd.isna(kdgol):
             return "-"
-        kdgol = str(kdgol).strip()
+        kdgol = format_nilai_asli(kdgol)
         if kdgol.startswith("3"):
             return "21-402-02"
         elif kdgol.startswith("4"):
@@ -121,11 +182,11 @@ def show():
         """Konversi kdkawin ke status"""
         if pd.isna(kdkawin):
             return "-"
-        kdkawin = str(kdkawin).strip()
+        kdkawin = format_nilai_asli(kdkawin)
         return KDKAWIN_MAP.get(kdkawin, "-")
     
     def read_excel_flexible(uploaded_file, expected_headers, label):
-        """Baca Excel dengan pencarian header fleksibel"""
+        """Baca Excel dengan pencarian header fleksibel dan pertahankan format asli"""
         if uploaded_file is None:
             return None
         
@@ -163,7 +224,16 @@ def show():
                 data = []
                 for row in sheet.iter_rows(min_row=best_row + 1, max_row=total_rows,
                                           min_col=first_non_empty_col + 1, values_only=True):
-                    data.append(list(row))
+                    # ===== PERUBAHAN: GUNAKAN FORMAT ASLI UNTUK SETIAP SEL =====
+                    formatted_row = []
+                    for cell in row:
+                        if isinstance(cell, (int, float)):
+                            # Pertahankan format asli angka
+                            formatted_row.append(format_nilai_asli(cell))
+                        else:
+                            formatted_row.append(cell)
+                    data.append(formatted_row)
+                    # ===== END PERUBAHAN =====
                 
                 # Ambil header yang valid (mulai dari kolom pertama yang tidak kosong)
                 actual_headers = best_row_values[first_non_empty_col:]
@@ -204,7 +274,15 @@ def show():
                 # Fallback: baca seluruh sheet
                 data = []
                 for row in sheet.iter_rows(min_row=1, max_row=total_rows, values_only=True):
-                    data.append(list(row))
+                    # ===== PERUBAHAN: GUNAKAN FORMAT ASLI UNTUK SETIAP SEL =====
+                    formatted_row = []
+                    for cell in row:
+                        if isinstance(cell, (int, float)):
+                            formatted_row.append(format_nilai_asli(cell))
+                        else:
+                            formatted_row.append(cell)
+                    data.append(formatted_row)
+                    # ===== END PERUBAHAN =====
                 
                 if len(data) < 2:
                     st.error(f"❌ {label}: File tidak memiliki cukup data")
@@ -231,6 +309,16 @@ def show():
                 df = df.dropna(how='all').reset_index(drop=True)
                 
                 st.warning(f"⚠️ {label}: Header tidak sepenuhnya cocok, menggunakan baris pertama")
+            
+            # ===== PERUBAHAN: BERSIHKAN KOLOM NUMERIK PENTING =====
+            # Daftar kolom yang perlu diformat khusus (angka panjang)
+            numeric_cols_keywords = ['nip', 'npwp', 'nik', 'rekening', 'nogaji', 'id']
+            
+            for col in df.columns:
+                col_lower = str(col).lower()
+                if any(keyword in col_lower for keyword in numeric_cols_keywords):
+                    df[col] = df[col].apply(format_angka_panjang)
+            # ===== END PERUBAHAN =====
             
             # Tampilkan kolom yang ditemukan
             st.info(f"Kolom ditemukan: {', '.join(df.columns.tolist()[:10])}{'...' if len(df.columns) > 10 else ''}")
@@ -267,8 +355,8 @@ def show():
         
         for idx, row in df_master.iterrows():
             # Match berdasarkan Nama dan NIP
-            nama_master = str(row.get(nama_col, '')).strip() if nama_col else ''
-            nip_master = str(row.get(nip_col, '')).strip() if nip_col else ''
+            nama_master = format_nilai_asli(row.get(nama_col, '')) if nama_col else ''
+            nip_master = format_nilai_asli(row.get(nip_col, '')) if nip_col else ''
             
             nama_score = fuzz.ratio(str(nama).lower(), nama_master.lower()) if nama and nama_master else 0
             nip_score = fuzz.ratio(str(nip).lower(), nip_master.lower()) if nip and nip_master else 0
@@ -308,10 +396,11 @@ def show():
         hasil = []
         
         for idx_mentah, row_mentah in df_mentah.iterrows():
+            # ===== PERUBAHAN: GUNAKAN FORMAT ASLI UNTUK DATA =====
             # Ambil data dari file mentah dengan penanganan error
-            nip = str(row_mentah.get('nip', '')).strip() if 'nip' in df_mentah.columns else ''
-            nama = str(row_mentah.get('nmpeg', '')).strip() if 'nmpeg' in df_mentah.columns else ''
-            npwp_mentah = str(row_mentah.get('npwp', '')).strip() if 'npwp' in df_mentah.columns else ''
+            nip = format_nilai_asli(row_mentah.get('nip', '')) if 'nip' in df_mentah.columns else ''
+            nama = format_nilai_asli(row_mentah.get('nmpeg', '')) if 'nmpeg' in df_mentah.columns else ''
+            npwp_mentah = format_nilai_asli(row_mentah.get('npwp', '')) if 'npwp' in df_mentah.columns else ''
             
             # Cari data BPMP yang cocok menggunakan fuzzy matching
             matched_bpmp = None
@@ -326,7 +415,7 @@ def show():
                         break
                 
                 if nik_col:
-                    nik_bpmp = str(row_bpmp.get(nik_col, '')).strip()
+                    nik_bpmp = format_nilai_asli(row_bpmp.get(nik_col, ''))
                     
                     # Matching berdasarkan NPWP/NIK
                     if npwp_mentah and nik_bpmp and npwp_mentah != '' and nik_bpmp != '':
@@ -351,7 +440,7 @@ def show():
                         posisi_col = col
                         break
                 if posisi_col:
-                    posisi = str(matched_bpmp.get(posisi_col, '')).strip()
+                    posisi = format_nilai_asli(matched_bpmp.get(posisi_col, ''))
                 
                 # Cari kolom NIK
                 nik_col = None
@@ -360,13 +449,14 @@ def show():
                         nik_col = col
                         break
                 if nik_col:
-                    nik_from_bpmp = str(matched_bpmp.get(nik_col, '')).strip()
+                    nik_from_bpmp = format_nilai_asli(matched_bpmp.get(nik_col, ''))
                     if nik_from_bpmp:
                         nik_bpmp = nik_from_bpmp
+            # ===== END PERUBAHAN =====
             
             # Ambil data lainnya dari mentah
-            kdgol = row_mentah.get('kdgol', '') if 'kdgol' in df_mentah.columns else ''
-            kdkawin = row_mentah.get('kdkawin', '') if 'kdkawin' in df_mentah.columns else ''
+            kdgol = format_nilai_asli(row_mentah.get('kdgol', '')) if 'kdgol' in df_mentah.columns else ''
+            kdkawin = format_nilai_asli(row_mentah.get('kdkawin', '')) if 'kdkawin' in df_mentah.columns else ''
             
             # Filter PNS/PPPK
             pns_pppk = ''
@@ -376,7 +466,7 @@ def show():
                     pns_pppk = 'PNS'
                 # Untuk PPPK biarkan kosong sesuai instruksi
             
-            # ===== PERUBAHAN: FORMAT ID PENERIMA TKU DAN ID TKU =====
+            # ===== PERUBAHAN: FORMAT ID PENERIMA TKU DAN ID TKU DENGAN FORMAT ASLI =====
             # Format ID PENERIMA TKU: ambil NIK lalu tambahkan "000000" di akhir
             id_penerima_tku = f"{nik_bpmp}000000" if nik_bpmp and nik_bpmp.strip() != '' else ''
             
@@ -395,12 +485,12 @@ def show():
                 'KDKAWIN': kdkawin,
                 'STATUS': konversi_status(kdkawin),
                 'NIP': nip,
-                'nmrek': row_mentah.get('nmrek', ''),
-                'nm_bank': row_mentah.get('nm_bank', ''),
-                'rekening': row_mentah.get('rekening', ''),
-                'kdbankspan': row_mentah.get('kdbankspan', ''),
-                'nmbankspan': row_mentah.get('nmbankspan', ''),
-                'kdpos': row_mentah.get('kdpos', ''),
+                'nmrek': format_nilai_asli(row_mentah.get('nmrek', '')),
+                'nm_bank': format_nilai_asli(row_mentah.get('nm_bank', '')),
+                'rekening': format_angka_panjang(row_mentah.get('rekening', '')),
+                'kdbankspan': format_nilai_asli(row_mentah.get('kdbankspan', '')),
+                'nmbankspan': format_nilai_asli(row_mentah.get('nmbankspan', '')),
+                'kdpos': format_nilai_asli(row_mentah.get('kdpos', '')),
                 'ID TKU': id_tku,  # Menggunakan nilai default
                 'AKTIF/TIDAK': 'AKTIF',
                 'Keterangan': ''
@@ -409,6 +499,14 @@ def show():
             hasil.append(row_data)
         
         df_hasil = pd.DataFrame(hasil)
+        
+        # ===== PERUBAHAN: BERSIHKAN KOLOM NUMERIK DI HASIL =====
+        # Pastikan kolom numerik penting diformat dengan benar
+        numeric_cols = ['NIP', 'NIK', 'ID PENERIMA TKU', 'rekening']
+        for col in numeric_cols:
+            if col in df_hasil.columns:
+                df_hasil[col] = df_hasil[col].apply(format_angka_panjang)
+        # ===== END PERUBAHAN =====
         
         # Merge dengan master existing jika ada
         if df_master_existing is not None and not df_master_existing.empty:
@@ -436,7 +534,7 @@ def show():
                     if ket_col:
                         existing_ket = df_master_existing.at[match_idx, ket_col]
                         if pd.notna(existing_ket) and existing_ket:
-                            df_hasil.at[idx, 'Keterangan'] = existing_ket
+                            df_hasil.at[idx, 'Keterangan'] = format_nilai_asli(existing_ket)
                 else:
                     # Data baru
                     df_hasil.at[idx, 'Status_Color'] = 'HIJAU'
@@ -457,8 +555,8 @@ def show():
                 if not nama_col or not nip_col:
                     continue
                 
-                nama_old = str(row_old.get(nama_col, '')).strip()
-                nip_old = str(row_old.get(nip_col, '')).strip()
+                nama_old = format_nilai_asli(row_old.get(nama_col, ''))
+                nip_old = format_nilai_asli(row_old.get(nip_col, ''))
                 
                 match_idx = fuzzy_match_row(nama_old, nip_old, df_hasil)
                 
@@ -468,7 +566,7 @@ def show():
                     
                     # ===== PERUBAHAN: UNTUK DATA LAMA YANG TIDAK AKTIF =====
                     # Format ID PENERIMA TKU dari NIK master lama
-                    nik_master = str(row_old_dict.get('NIK', '')).strip()
+                    nik_master = format_nilai_asli(row_old_dict.get('NIK', ''))
                     id_penerima_tku_old = f"{nik_master}000000" if nik_master and nik_master.strip() != '' else ''
                     
                     # ID TKU tetap menggunakan nilai default
@@ -478,24 +576,24 @@ def show():
                     # Map kolom dari master existing ke format hasil
                     new_row = {
                         'No': len(df_hasil) + 1,
-                        'PNS/PPPK': row_old_dict.get('PNS/PPPK', ''),
+                        'PNS/PPPK': format_nilai_asli(row_old_dict.get('PNS/PPPK', '')),
                         'Nama': nama_old,
-                        'NIK': row_old_dict.get('NIK', ''),
+                        'NIK': format_nilai_asli(row_old_dict.get('NIK', '')),
                         'ID PENERIMA TKU': id_penerima_tku_old,  # Menggunakan format baru
-                        'KDGOL': row_old_dict.get('KDGOL', ''),
-                        'KODE OBJEK PAJAK': row_old_dict.get('KODE OBJEK PAJAK', ''),
-                        'KDKAWIN': row_old_dict.get('KDKAWIN', ''),
-                        'STATUS': row_old_dict.get('STATUS', ''),
+                        'KDGOL': format_nilai_asli(row_old_dict.get('KDGOL', '')),
+                        'KODE OBJEK PAJAK': format_nilai_asli(row_old_dict.get('KODE OBJEK PAJAK', '')),
+                        'KDKAWIN': format_nilai_asli(row_old_dict.get('KDKAWIN', '')),
+                        'STATUS': format_nilai_asli(row_old_dict.get('STATUS', '')),
                         'NIP': nip_old,
-                        'nmrek': row_old_dict.get('nmrek', ''),
-                        'nm_bank': row_old_dict.get('nm_bank', ''),
-                        'rekening': row_old_dict.get('rekening', ''),
-                        'kdbankspan': row_old_dict.get('kdbankspan', ''),
-                        'nmbankspan': row_old_dict.get('nmbankspan', ''),
-                        'kdpos': row_old_dict.get('kdpos', ''),
+                        'nmrek': format_nilai_asli(row_old_dict.get('nmrek', '')),
+                        'nm_bank': format_nilai_asli(row_old_dict.get('nm_bank', '')),
+                        'rekening': format_angka_panjang(row_old_dict.get('rekening', '')),
+                        'kdbankspan': format_nilai_asli(row_old_dict.get('kdbankspan', '')),
+                        'nmbankspan': format_nilai_asli(row_old_dict.get('nmbankspan', '')),
+                        'kdpos': format_nilai_asli(row_old_dict.get('kdpos', '')),
                         'ID TKU': id_tku_old,  # Menggunakan nilai default
                         'AKTIF/TIDAK': 'TIDAK',
-                        'Keterangan': row_old_dict.get('Keterangan', ''),
+                        'Keterangan': format_nilai_asli(row_old_dict.get('Keterangan', '')),
                         'Status_Color': 'MERAH'
                     }
                     
@@ -512,6 +610,13 @@ def show():
         
         # Hapus kolom helper
         df_export = df.drop(columns=['Status_Color'], errors='ignore')
+        
+        # ===== PERUBAHAN: FORMAT KOLOM NUMERIK SEBELUM EXPORT =====
+        # Format kolom numerik untuk export Excel
+        for col in df_export.columns:
+            if col in ['NIP', 'NIK', 'ID PENERIMA TKU', 'rekening', 'ID TKU']:
+                df_export[col] = df_export[col].apply(lambda x: format_angka_panjang(x) if pd.notna(x) else '')
+        # ===== END PERUBAHAN =====
         
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_export.to_excel(writer, index=False, sheet_name='Master Data')
@@ -998,8 +1103,8 @@ def show():
                         if col == 'No' or col == 'Status_Color' or col == 'Keterangan':
                             continue
                         
-                        val_old = str(row_old.get(col, '')).strip() if row_old is not None else ''
-                        val_new = str(row_new.get(col, '')).strip() if row_new is not None else ''
+                        val_old = format_nilai_asli(row_old.get(col, '')) if row_old is not None else ''
+                        val_new = format_nilai_asli(row_new.get(col, '')) if row_new is not None else ''
                         
                         if val_old != val_new:
                             differences[col] = {
@@ -1014,8 +1119,8 @@ def show():
                 comparison_data = []
                 
                 for idx_new, row_new in df_new.iterrows():
-                    nama_new = str(row_new.get('Nama', '')).strip()
-                    nip_new = str(row_new.get('NIP', '')).strip()
+                    nama_new = format_nilai_asli(row_new.get('Nama', ''))
+                    nip_new = format_nilai_asli(row_new.get('NIP', ''))
                     
                     # Cari matching row di master lama
                     match_idx = fuzzy_match_row(nama_new, nip_new, df_old)
@@ -1050,8 +1155,8 @@ def show():
                 
                 # Tambahkan data yang hilang (ada di master lama tapi tidak di master baru)
                 for idx_old, row_old in df_old.iterrows():
-                    nama_old = str(row_old.get('Nama', '')).strip()
-                    nip_old = str(row_old.get('NIP', '')).strip()
+                    nama_old = format_nilai_asli(row_old.get('Nama', ''))
+                    nip_old = format_nilai_asli(row_old.get('NIP', ''))
                     
                     # Cek apakah kolom ada
                     nama_col = None
@@ -1064,8 +1169,8 @@ def show():
                             nip_col = col
                     
                     if nama_col and nip_col:
-                        nama_old = str(row_old.get(nama_col, '')).strip()
-                        nip_old = str(row_old.get(nip_col, '')).strip()
+                        nama_old = format_nilai_asli(row_old.get(nama_col, ''))
+                        nip_old = format_nilai_asli(row_old.get(nip_col, ''))
                         
                         match_idx = fuzzy_match_row(nama_old, nip_old, df_new)
                         
@@ -1224,8 +1329,8 @@ def show():
                                 if col in ['No', 'Status_Color', 'Keterangan']:  # Ignore Keterangan
                                     continue
                                 
-                                val_old = str(selected_row['row_old'].get(col, '')).strip() if selected_row['row_old'] is not None else '-'
-                                val_new = str(selected_row['row_new'].get(col, '')).strip() if selected_row['row_new'] is not None else '-'
+                                val_old = format_nilai_asli(selected_row['row_old'].get(col, '')) if selected_row['row_old'] is not None else '-'
+                                val_new = format_nilai_asli(selected_row['row_new'].get(col, '')) if selected_row['row_new'] is not None else '-'
                                 
                                 is_different = (col in selected_row['differences'])
                                 
@@ -1257,7 +1362,7 @@ def show():
                             for col in HEADERS_MASTER:
                                 if col in ['No', 'Status_Color', 'Keterangan']:  # Ignore Keterangan
                                     continue
-                                val = str(selected_row['row_new'].get(col, '')).strip()
+                                val = format_nilai_asli(selected_row['row_new'].get(col, ''))
                                 detail_data.append({
                                     'Kolom': col,
                                     'Nilai': val
@@ -1272,7 +1377,7 @@ def show():
                             for col in HEADERS_MASTER:
                                 if col in ['No', 'Status_Color', 'Keterangan']:  # Ignore Keterangan
                                     continue
-                                val = str(selected_row['row_new'].get(col, '')).strip()
+                                val = format_nilai_asli(selected_row['row_new'].get(col, ''))
                                 detail_data.append({
                                     'Kolom': col,
                                     'Nilai': val
@@ -1287,7 +1392,7 @@ def show():
                             for col in HEADERS_MASTER:
                                 if col in ['No', 'Status_Color', 'Keterangan']:  # Ignore Keterangan
                                     continue
-                                val = str(selected_row['row_old'].get(col, '')).strip()
+                                val = format_nilai_asli(selected_row['row_old'].get(col, ''))
                                 detail_data.append({
                                     'Kolom': col,
                                     'Nilai': val
@@ -1413,29 +1518,29 @@ def show():
                 bpmp_mapping = {}
                 if nik_col_bpmp:
                     for idx_bpmp, row_bpmp in df_bpmp.iterrows():
-                        nik_bpmp = str(row_bpmp.get(nik_col_bpmp, '')).strip()
+                        nik_bpmp = format_nilai_asli(row_bpmp.get(nik_col_bpmp, ''))
                         if nik_bpmp:
                             # Simpan row dan data tambahan
                             bpmp_data = {
                                 'row': row_bpmp,
-                                'masa_pajak': str(row_bpmp.get(masa_pajak_col_bpmp, '')).strip() if masa_pajak_col_bpmp else '',
-                                'tahun_pajak': str(row_bpmp.get(tahun_pajak_col_bpmp, '')).strip() if tahun_pajak_col_bpmp else '',
-                                'penghasilan_kotor': str(row_bpmp.get(penghasilan_kotor_col_bpmp, '')).strip() if penghasilan_kotor_col_bpmp else '',
-                                'status_bpmp': str(row_bpmp.get(status_col_bpmp, '')).strip() if status_col_bpmp else ''
+                                'masa_pajak': format_nilai_asli(row_bpmp.get(masa_pajak_col_bpmp, '')) if masa_pajak_col_bpmp else '',
+                                'tahun_pajak': format_nilai_asli(row_bpmp.get(tahun_pajak_col_bpmp, '')) if tahun_pajak_col_bpmp else '',
+                                'penghasilan_kotor': format_nilai_asli(row_bpmp.get(penghasilan_kotor_col_bpmp, '')) if penghasilan_kotor_col_bpmp else '',
+                                'status_bpmp': format_nilai_asli(row_bpmp.get(status_col_bpmp, '')) if status_col_bpmp else ''
                             }
                             bpmp_mapping[nik_bpmp] = bpmp_data
                 # ===== END PERUBAHAN =====
                 
                 for idx_mentah, row_mentah in df_mentah.iterrows():
-                    nip_mentah = str(row_mentah.get('nip', '')).strip() if 'nip' in df_mentah.columns else ''
-                    npwp_mentah = str(row_mentah.get('npwp', '')).strip() if 'npwp' in df_mentah.columns else ''
-                    nama_mentah = str(row_mentah.get('nmpeg', '')).strip() if 'nmpeg' in df_mentah.columns else ''
+                    nip_mentah = format_nilai_asli(row_mentah.get('nip', '')) if 'nip' in df_mentah.columns else ''
+                    npwp_mentah = format_nilai_asli(row_mentah.get('npwp', '')) if 'npwp' in df_mentah.columns else ''
+                    nama_mentah = format_nilai_asli(row_mentah.get('nmpeg', '')) if 'nmpeg' in df_mentah.columns else ''
                     
                     # ===== PERUBAHAN: AMBIL DATA TAMBAHAN DARI MENTAH =====
-                    bulan_mentah = str(row_mentah.get(bulan_col_mentah, '')).strip() if bulan_col_mentah else ''
-                    tahun_mentah = str(row_mentah.get(tahun_col_mentah, '')).strip() if tahun_col_mentah else ''
-                    gaji_kotor_mentah = str(row_mentah.get(gaji_kotor_col_mentah, '')).strip() if gaji_kotor_col_mentah else ''
-                    kdkawin_mentah = str(row_mentah.get(kdkawin_col_mentah, '')).strip() if kdkawin_col_mentah else ''
+                    bulan_mentah = format_nilai_asli(row_mentah.get(bulan_col_mentah, '')) if bulan_col_mentah else ''
+                    tahun_mentah = format_nilai_asli(row_mentah.get(tahun_col_mentah, '')) if tahun_col_mentah else ''
+                    gaji_kotor_mentah = format_nilai_asli(row_mentah.get(gaji_kotor_col_mentah, '')) if gaji_kotor_col_mentah else ''
+                    kdkawin_mentah = format_nilai_asli(row_mentah.get(kdkawin_col_mentah, '')) if kdkawin_col_mentah else ''
                     status_kawin_mentah = konversi_status(kdkawin_mentah) if kdkawin_col_mentah else ''
                     # ===== END PERUBAHAN =====
                     
@@ -1955,7 +2060,7 @@ def show():
                 st.markdown("### 🔑 Validasi Primary Key (NIP)")
                 
                 if 'nip' in df_mentah.columns:
-                    nip_series = df_mentah['nip'].astype(str).str.strip()
+                    nip_series = df_mentah['nip'].apply(format_nilai_asli)
                     nip_duplicates = nip_series[nip_series.duplicated(keep=False)]
                     
                     if len(nip_duplicates) > 0:
@@ -1973,8 +2078,8 @@ def show():
                                     duplicate_data.append({
                                         'Baris': idx + 2, # +2 karena header dan index mulai dari 0
                                         'NIP (DUPLIKAT)': dup_nip,
-                                        'Nama': str(row.get('nmpeg', '')).strip() if 'nmpeg' in df_mentah.columns else '-',
-                                        'KDGOL': str(row.get('kdgol', '')).strip() if 'kdgol' in df_mentah.columns else '-',
+                                        'Nama': format_nilai_asli(row.get('nmpeg', '')) if 'nmpeg' in df_mentah.columns else '-',
+                                        'KDGOL': format_nilai_asli(row.get('kdgol', '')) if 'kdgol' in df_mentah.columns else '-',
                                         'Jumlah Duplikat': len(dup_rows)
                                     })
                         
@@ -2061,11 +2166,11 @@ def show():
                 
                 for idx_mentah, row_mentah in df_mentah.iterrows():
                     # Ambil data dari mentah
-                    nip_mentah = str(row_mentah.get('nip', '')).strip() if 'nip' in df_mentah.columns else ''
-                    nmpeg_mentah = str(row_mentah.get('nmpeg', '')).strip() if 'nmpeg' in df_mentah.columns else ''
-                    npwp_mentah = str(row_mentah.get('npwp', '')).strip() if 'npwp' in df_mentah.columns else ''
-                    kdgol_mentah = str(row_mentah.get('kdgol', '')).strip() if 'kdgol' in df_mentah.columns else ''
-                    kdkawin_mentah = str(row_mentah.get('kdkawin', '')).strip() if 'kdkawin' in df_mentah.columns else ''
+                    nip_mentah = format_nilai_asli(row_mentah.get('nip', '')) if 'nip' in df_mentah.columns else ''
+                    nmpeg_mentah = format_nilai_asli(row_mentah.get('nmpeg', '')) if 'nmpeg' in df_mentah.columns else ''
+                    npwp_mentah = format_nilai_asli(row_mentah.get('npwp', '')) if 'npwp' in df_mentah.columns else ''
+                    kdgol_mentah = format_nilai_asli(row_mentah.get('kdgol', '')) if 'kdgol' in df_mentah.columns else ''
+                    kdkawin_mentah = format_nilai_asli(row_mentah.get('kdkawin', '')) if 'kdkawin' in df_mentah.columns else ''
                     
                     # PRIMARY KEY: Cari matching di master berdasarkan NIP EXACT MATCH
                     match_found = False
@@ -2082,7 +2187,7 @@ def show():
                         nip_col_master = master_cols['NIP']
                         
                         for idx_master, row_master in df_master.iterrows():
-                            nip_master_check = str(row_master.get(nip_col_master, '')).strip()
+                            nip_master_check = format_nilai_asli(row_master.get(nip_col_master, ''))
                             
                             # PRIMARY KEY: Exact match untuk NIP (tidak pakai fuzzy)
                             if nip_master_check and nip_mentah == nip_master_check:
@@ -2091,13 +2196,13 @@ def show():
                                 
                                 # Ambil data dari master untuk field lainnya
                                 if 'Nama' in master_cols:
-                                    nama_master = str(row_master.get(master_cols['Nama'], '')).strip()
+                                    nama_master = format_nilai_asli(row_master.get(master_cols['Nama'], ''))
                                 if 'NIK' in master_cols:
-                                    nik_master = str(row_master.get(master_cols['NIK'], '')).strip()
+                                    nik_master = format_nilai_asli(row_master.get(master_cols['NIK'], ''))
                                 if 'KDGOL' in master_cols:
-                                    kdgol_master = str(row_master.get(master_cols['KDGOL'], '')).strip()
+                                    kdgol_master = format_nilai_asli(row_master.get(master_cols['KDGOL'], ''))
                                 if 'KDKAWIN' in master_cols:
-                                    kdkawin_master = str(row_master.get(master_cols['KDKAWIN'], '')).strip()
+                                    kdkawin_master = format_nilai_asli(row_master.get(master_cols['KDKAWIN'], ''))
                                 
                                 # Bandingkan HANYA field selain NIP (NIP sudah match sebagai Primary Key)
                                 if nama_master and nmpeg_mentah:
